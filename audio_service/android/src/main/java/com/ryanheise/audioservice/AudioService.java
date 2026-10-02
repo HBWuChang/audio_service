@@ -348,8 +348,33 @@ public class AudioService extends MediaBrowserServiceCompat {
 
     @Override
     public int onStartCommand(final Intent intent, int flags, int startId) {
+        // Dispatch media button intents directly to the media session callback
+        // rather than via MediaButtonReceiver.handleIntent(), which forwards them
+        // to MediaController.dispatchMediaButtonEvent(). On Android 14+ that method
+        // silently drops KEYCODE_MUTE (the synthetic keycode used for the
+        // notification's play action) because it is no longer listed in
+        // KeyEvent.isMediaSessionKey().
+        if (intent != null && Intent.ACTION_MEDIA_BUTTON.equals(intent.getAction())) {
+            @SuppressWarnings("deprecation")
+            final KeyEvent event = intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+            if (event != null && handleMediaButtonEvent(event)) {
+                return START_NOT_STICKY;
+            }
+        }
         MediaButtonReceiver.handleIntent(mediaSession, intent);
         return START_NOT_STICKY;
+    }
+
+    /**
+     * Dispatches a media button key event directly to the media session callback,
+     * bypassing MediaController.dispatchMediaButtonEvent(). This is used for the
+     * notification's action buttons, whose synthetic keycodes (notably
+     * KEYCODE_MUTE for "play") are rejected by KeyEvent.isMediaSessionKey() on
+     * Android 14 and above.
+     */
+    public boolean handleMediaButtonEvent(KeyEvent event) {
+        if (mediaSessionCallback == null) return false;
+        return mediaSessionCallback.handleMediaButtonEvent(event);
     }
 
     public void stop() {
@@ -946,6 +971,20 @@ public class AudioService extends MediaBrowserServiceCompat {
             // TODO: use typesafe version once SDK 33 is released.
             @SuppressWarnings("deprecation")
             final KeyEvent event = (KeyEvent)mediaButtonEvent.getExtras().getParcelable(Intent.EXTRA_KEY_EVENT);
+            return handleMediaButtonEvent(event);
+        }
+
+        /**
+         * Handles a media button key event. This is called both for genuine media
+         * button presses (via {@link #onMediaButtonEvent(Intent)}) and directly from
+         * {@link AudioService#handleMediaButtonEvent(KeyEvent)} for the notification
+         * action buttons. The direct path avoids
+         * MediaController.dispatchMediaButtonEvent(), which on Android 14+ drops
+         * KEYCODE_MUTE (the keycode used for the notification's play action).
+         */
+        public boolean handleMediaButtonEvent(KeyEvent event) {
+            if (listener == null) return false;
+            if (event == null) return false;
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 switch (event.getKeyCode()) {
                 case KEYCODE_BYPASS_PLAY:
