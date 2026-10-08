@@ -581,6 +581,14 @@ public class AudioService extends MediaBrowserServiceCompat {
         mediaSession.setShuffleMode(shuffleMode);
         mediaSession.setCaptioningEnabled(captioningEnabled);
 
+        // 只要发布了非 idle 的播放状态，就让会话保持活跃。
+        // 原生应用就是这么做的：暂停时会话仍然 active，控制中心的媒体卡片才会
+        // 归属本应用，用户可以直接点卡片播放，硬件媒体按键也才会定向路由到这里。
+        // 发布 idle 状态（Dart 侧在长时间空闲时做）会走下面的 stop() 释放会话。
+        if (processingState != AudioProcessingState.idle) {
+            activateMediaSession();
+        }
+
         if (!wasPlaying && playing) {
             enterPlayingState();
         } else if (wasPlaying && !playing) {
